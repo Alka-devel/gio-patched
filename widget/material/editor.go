@@ -89,7 +89,9 @@ func (e EditorStyle) Layout(gtx layout.Context) layout.Dimensions {
 	e.Editor.LineHeightScale = e.LineHeightScale
 	dims = e.Editor.Layout(gtx, e.shaper, e.Font, e.TextSize, textColor, selectionColor)
 	if e.Editor.Len() == 0 {
+		stack := op.Offset(e.Editor.TextOffset()).Push(gtx.Ops)
 		call.Add(gtx.Ops)
+		stack.Pop()
 	}
 	return dims
 }

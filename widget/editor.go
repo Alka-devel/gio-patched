@@ -755,7 +755,7 @@ func (e *Editor) layout(gtx layout.Context, textMaterial, selectMaterial op.Call
 	e.updateIMEState(gtx)
 	visibleDims := e.text.Dimensions()
 
-	defer clip.Rect(image.Rectangle{Max: visibleDims.Size}).Push(gtx.Ops).Pop()
+	defer clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops).Pop()
 	pointer.CursorText.Add(gtx.Ops)
 	event.Op(gtx.Ops, e)
 	key.InputHintOp{Tag: e, Hint: e.InputHint}.Add(gtx.Ops)
@@ -1205,3 +1205,11 @@ func sign(n int) int {
 func (s ChangeEvent) isEditorEvent() {}
 func (s SubmitEvent) isEditorEvent() {}
 func (s SelectEvent) isEditorEvent() {}
+
+// SetTextOffset sets the visual offset of the rendered text within the editor view.
+func (e *Editor) SetTextOffset(x, y int) {
+	e.text.TextOffset = image.Point{x, y}
+}
+func (e *Editor) TextOffset() image.Point {
+	return e.text.TextOffset
+}

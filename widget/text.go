@@ -68,6 +68,10 @@ type textView struct {
 	// Newline characters are not masked. When non-zero, the unmasked contents
 	// are accessed by Len, Text, and SetText.
 	Mask rune
+	//Specifies the offset applied to the rendered text within the view.
+	//Defines how far the text origin is shifted horizontally (X) and vertically (Y) in
+	//pixels relative to its default layout position.
+	TextOffset image.Point
 
 	params     text.Parameters
 	shaper     *text.Shaper
@@ -112,7 +116,7 @@ func (e *textView) Changed() bool {
 // Dimensions returns the dimensions of the visible text.
 func (e *textView) Dimensions() layout.Dimensions {
 	basePos := e.dims.Size.Y - e.dims.Baseline
-	return layout.Dimensions{Size: e.viewSize, Baseline: e.viewSize.Y - basePos}
+	return layout.Dimensions{Size: e.viewSize, Baseline: e.viewSize.Y - basePos - e.TextOffset.Y}
 }
 
 // FullDimensions returns the dimensions of all shaped text, including
@@ -235,6 +239,8 @@ func (e *textView) calculateViewSize(gtx layout.Context) image.Point {
 	if caretWidth := e.caretWidth(gtx); base.X < caretWidth {
 		base.X = caretWidth
 	}
+	base.X += abs(e.TextOffset.X)
+	base.Y += abs(e.TextOffset.Y)
 	return gtx.Constraints.Constrain(base)
 }
 
@@ -312,11 +318,12 @@ func (e *textView) Layout(gtx layout.Context, lt *text.Shaper, font font.Font, s
 // PaintSelection clips and paints the visible text selection rectangles using
 // the provided material to fill the rectangles.
 func (e *textView) PaintSelection(gtx layout.Context, material op.CallOp) {
-	localViewport := image.Rectangle{Max: e.viewSize}
+	localViewport := image.Rectangle{Max: e.viewSize}.Add(e.TextOffset)
 	docViewport := image.Rectangle{Max: e.viewSize}.Add(e.scrollOff)
 	defer clip.Rect(localViewport).Push(gtx.Ops).Pop()
 	e.regions = e.index.locate(docViewport, e.caret.start, e.caret.end, e.regions)
 	for _, region := range e.regions {
+		region.Bounds = region.Bounds.Add(e.TextOffset)
 		area := clip.Rect(region.Bounds).Push(gtx.Ops)
 		material.Add(gtx.Ops)
 		paint.PaintOp{}.Add(gtx.Ops)
@@ -327,6 +334,10 @@ func (e *textView) PaintSelection(gtx layout.Context, material op.CallOp) {
 // PaintText clips and paints the visible text glyph outlines using the provided
 // material to fill the glyphs.
 func (e *textView) PaintText(gtx layout.Context, material op.CallOp) {
+	defer op.Offset(image.Pt(
+		e.TextOffset.X,
+		e.TextOffset.Y,
+	)).Push(gtx.Ops).Pop()
 	m := op.Record(gtx.Ops)
 	viewport := image.Rectangle{
 		Min: e.scrollOff,
@@ -372,12 +383,11 @@ func (e *textView) caretWidth(gtx layout.Context) int {
 func (e *textView) PaintCaret(gtx layout.Context, material op.CallOp) {
 	carWidth2 := e.caretWidth(gtx)
 	caretPos, carAsc, carDesc := e.CaretInfo()
-
 	carRect := image.Rectangle{
 		Min: caretPos.Sub(image.Pt(carWidth2, carAsc)),
 		Max: caretPos.Add(image.Pt(carWidth2, carDesc)),
 	}
-	cl := image.Rectangle{Max: e.viewSize}
+	cl := image.Rectangle{Max: e.viewSize}.Add(e.TextOffset)
 	carRect = cl.Intersect(carRect)
 	if !carRect.Empty() {
 		defer clip.Rect(carRect).Push(gtx.Ops).Pop()
@@ -397,6 +407,8 @@ func (e *textView) CaretInfo() (pos image.Point, ascent, descent int) {
 		Y: caretStart.y,
 	}
 	pos = pos.Sub(e.scrollOff)
+	pos.X += e.TextOffset.X
+	pos.Y += e.TextOffset.Y
 	return
 }
 
@@ -471,8 +483,8 @@ func (e *textView) scrollAbs(x, y int) {
 // MoveCoord moves the caret to the position closest to the provided
 // point that is aligned to a grapheme cluster boundary.
 func (e *textView) MoveCoord(pos image.Point) {
-	x := fixed.I(pos.X + e.scrollOff.X)
-	y := pos.Y + e.scrollOff.Y
+	x := fixed.I(pos.X - e.TextOffset.X + e.scrollOff.X)
+	y := pos.Y + e.scrollOff.Y - e.TextOffset.Y
 	p, _ := e.closestToXYGraphemes(x, y)
 	e.caret.start = p.runes
 	e.caret.xoff = 0
@@ -534,7 +546,10 @@ func (e *textView) CaretPos() (line, col int) {
 // editor itself.
 func (e *textView) CaretCoords() f32.Point {
 	pos := e.closestToRune(e.caret.start)
-	return f32.Pt(float32(pos.x)/64-float32(e.scrollOff.X), float32(pos.y-e.scrollOff.Y))
+	return f32.Pt(
+		float32(pos.x)/64-float32(e.scrollOff.X)+float32(e.TextOffset.X),
+		float32(pos.y-e.scrollOff.Y)+float32(e.TextOffset.Y),
+	)
 }
 
 // indexRune returns the latest rune index and byte offset no later than r.
@@ -849,7 +864,7 @@ func (e *textView) ReadAt(p []byte, offset int64) (int, error) {
 func (e *textView) Regions(start, end int, regions []Region) []Region {
 	viewport := image.Rectangle{
 		Min: e.scrollOff,
-		Max: e.viewSize.Add(e.scrollOff),
+		Max: e.viewSize.Add(e.scrollOff).Add(e.TextOffset),
 	}
 	return e.index.locate(viewport, start, end, regions)
 }
